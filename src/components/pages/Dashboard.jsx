@@ -1,10 +1,10 @@
 import React, { useRef, useEffect } from 'react';
 import { useStore } from '../../store/StoreContext.jsx';
-import { fmt, statusColors } from '../../utils/helpers.js';
+import { fmt, fmtDate, statusColors } from '../../utils/helpers.js';
 import Chart from 'chart.js/auto';
 
-export default function Dashboard() {
-  const { data, cfg } = useStore();
+export default function Dashboard({ onNavigate }) {
+  const { data, cfg, alerts } = useStore();
   const chartRef = useRef(null);
   const chartInstance = useRef(null);
   const donutRef = useRef(null);
@@ -156,6 +156,49 @@ export default function Dashboard() {
 
   return (
     <div className="p-6">
+      {/* Alerts banner */}
+      {alerts.length > 0 && (
+        <div className="mb-5 space-y-2">
+          {alerts.slice(0, 3).map((alert) => (
+            <div
+              key={alert.id}
+              className="p-3 rounded-lg flex items-start gap-3 cursor-pointer transition"
+              style={{
+                background:
+                  alert.type === 'error'
+                    ? 'rgba(255,91,91,0.08)'
+                    : 'rgba(240,180,41,0.08)',
+                border: `1px solid ${
+                  alert.type === 'error'
+                    ? 'rgba(255,91,91,0.3)'
+                    : 'rgba(240,180,41,0.3)'
+                }`,
+              }}
+              onClick={() => alert.reservationId && onNavigate?.('reservations')}
+            >
+              <span className="text-lg">{alert.type === 'error' ? '⚠️' : '⏰'}</span>
+              <div className="flex-1">
+                <div className="text-sm font-medium">{alert.title}</div>
+                <div className="text-xs mt-0.5" style={{ color: 'var(--text2)' }}>
+                  {alert.message}
+                </div>
+              </div>
+              {alert.reservationId && (
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onNavigate?.('reservations');
+                  }}
+                >
+                  Voir →
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <div className="kpi-card">
           <div
@@ -237,7 +280,10 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="card">
+      {/* Active reservations */}
+      <ActiveReservationsCard data={data} cfg={cfg} onNavigate={onNavigate} />
+
+      <div className="card mt-4">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-display font-semibold text-base">
             Top {cfg.asset.plural.toLowerCase()} par revenus
@@ -278,6 +324,89 @@ export default function Dashboard() {
           </table>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Active reservations section
+function ActiveReservationsCard({ data, cfg, onNavigate }) {
+  const sectorAssetIds = data.assets.filter((a) => a.sector === data.sector).map((a) => a.id);
+  const activeReservations = (data.reservations || [])
+    .filter((r) => sectorAssetIds.includes(r.assetId) && r.status === 'active')
+    .sort((a, b) => new Date(a.endDate) - new Date(b.endDate))
+    .slice(0, 5);
+
+  return (
+    <div className="card">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="font-display font-semibold text-base">
+          📅 Réservations en cours ({activeReservations.length})
+        </h3>
+        <button
+          className="btn btn-ghost btn-sm"
+          onClick={() => onNavigate?.('reservations')}
+        >
+          Tout voir →
+        </button>
+      </div>
+      {activeReservations.length === 0 ? (
+        <div className="empty">
+          <div className="text-3xl mb-2">📅</div>
+          Aucune réservation en cours pour ce secteur.
+        </div>
+      ) : (
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>N°</th>
+              <th>{cfg.asset.singular}</th>
+              <th>Client</th>
+              <th>Période</th>
+              <th>Fin dans</th>
+              <th className="text-right">Restant à payer</th>
+            </tr>
+          </thead>
+          <tbody>
+            {activeReservations.map((r) => {
+              const asset = data.assets.find((a) => a.id === r.assetId);
+              const party = data.parties.find((p) => p.id === r.partyId);
+              const daysLeft = Math.ceil(
+                (new Date(r.endDate) - new Date()) / (1000 * 60 * 60 * 24)
+              );
+              const remaining = (r.totalAmount || 0) - (r.paidAmount || 0);
+              return (
+                <tr key={r.id}>
+                  <td className="font-mono text-xs">{r.number}</td>
+                  <td>{asset?.name || '—'}</td>
+                  <td>{party?.fullName || '—'}</td>
+                  <td className="text-xs" style={{ color: 'var(--text2)' }}>
+                    {fmtDate(r.startDate)} → {fmtDate(r.endDate)}
+                  </td>
+                  <td>
+                    <span
+                      className={`tag ${
+                        daysLeft <= 1
+                          ? 'tag-red'
+                          : daysLeft <= 3
+                          ? 'tag-gold'
+                          : 'tag-blue'
+                      }`}
+                    >
+                      {daysLeft <= 0 ? 'Aujourd\'hui' : `${daysLeft} j`}
+                    </span>
+                  </td>
+                  <td
+                    className="text-right font-medium"
+                    style={{ color: remaining > 0 ? 'var(--gold)' : 'var(--green)' }}
+                  >
+                    {remaining > 0 ? fmt(remaining) : '✓ Soldé'}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }

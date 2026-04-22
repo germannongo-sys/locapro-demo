@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { useStore } from '../../store/StoreContext.jsx';
-import { fmt, fmtDate, invoiceStatuses } from '../../utils/helpers.js';
+import { fmt, fmtDate, invoiceStatuses, isAdmin } from '../../utils/helpers.js';
 
 export default function InvoicesPage() {
   const { data, updateData, showToast, cfg } = useStore();
+  const userIsAdmin = isAdmin(data.user);
   const [statusFilter, setStatusFilter] = useState('all');
+  const [search, setSearch] = useState('');
   const [viewing, setViewing] = useState(null);
 
   const sectorAssetIds = data.assets.filter((a) => a.sector === data.sector).map((a) => a.id);
@@ -12,24 +14,43 @@ export default function InvoicesPage() {
     .filter((c) => sectorAssetIds.includes(c.assetId))
     .map((c) => c.id);
   const sectorInvoices = data.invoices.filter((i) => sectorContractIds.includes(i.contractId));
-  const filtered = sectorInvoices.filter((i) => statusFilter === 'all' || i.status === statusFilter);
+  const filtered = sectorInvoices.filter((i) => {
+    if (statusFilter !== 'all' && i.status !== statusFilter) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      const contract = data.contracts.find((c) => c.id === i.contractId);
+      const party = data.parties.find((p) => p.id === contract?.partyId);
+      if (!`${i.number} ${party?.fullName || ''}`.toLowerCase().includes(q)) return false;
+    }
+    return true;
+  });
 
   const totalAmount = filtered.reduce((s, i) => s + i.amountTtc, 0);
   const totalPaid = filtered.reduce((s, i) => s + (i.amountPaid || 0), 0);
 
   const markPaid = (inv) => {
-    updateData((d) => ({
-      ...d,
-      invoices: d.invoices.map((i) =>
-        i.id === inv.id ? { ...i, status: 'paid', amountPaid: i.amountTtc } : i
-      ),
-    }));
+    updateData(
+      (d) => ({
+        ...d,
+        invoices: d.invoices.map((i) =>
+          i.id === inv.id ? { ...i, status: 'paid', amountPaid: i.amountTtc } : i
+        ),
+      }),
+      { action: 'invoice.update', target: inv.number, details: 'Marquée comme payée' }
+    );
     showToast('Facture marquée comme payée');
   };
 
-  const handleDelete = (id) => {
-    if (!window.confirm('Supprimer cette facture ?')) return;
-    updateData((d) => ({ ...d, invoices: d.invoices.filter((i) => i.id !== id) }));
+  const handleDelete = (inv) => {
+    if (!userIsAdmin) {
+      showToast('🛡️ Seul un administrateur peut supprimer une facture', 'error');
+      return;
+    }
+    if (!window.confirm(`Supprimer définitivement la facture ${inv.number} ?`)) return;
+    updateData(
+      (d) => ({ ...d, invoices: d.invoices.filter((i) => i.id !== inv.id) }),
+      { action: 'invoice.delete', target: inv.number, details: `Suppression facture ${fmt(inv.amountTtc)}` }
+    );
     showToast('Facture supprimée');
   };
 
@@ -66,7 +87,14 @@ export default function InvoicesPage() {
         </div>
       </div>
 
-      <div className="flex gap-2 mb-4">
+      <div className="flex flex-wrap gap-2 mb-4">
+        <input
+          className="input"
+          style={{ maxWidth: '300px' }}
+          placeholder="🔍 Rechercher par n° ou client..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
         <select
           className="input"
           style={{ maxWidth: '200px' }}
@@ -141,13 +169,16 @@ export default function InvoicesPage() {
                             ✓
                           </button>
                         )}
-                        <button
-                          className="btn btn-ghost btn-sm"
-                          onClick={() => handleDelete(inv.id)}
-                          style={{ color: 'var(--red)' }}
-                        >
-                          🗑
-                        </button>
+                        {userIsAdmin && (
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => handleDelete(inv)}
+                            style={{ color: 'var(--red)' }}
+                            title="Supprimer (admin)"
+                          >
+                            🗑
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
